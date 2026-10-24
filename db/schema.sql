@@ -27,3 +27,12 @@ CREATE TABLE payments(
     status  TEXT NOT NULL
 
 );
+
+CREATE TABLE statements(
+    id  SERIAL PRIMARY KEY,
+    customer_id  INT NOT NULL REFERENCES customers(id),
+    loan_id INT NOT NULL REFERENCES loans(id),
+    period  TEXT NOT NULL,
+    sent_to TEXT NOT NULL,
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
