@@ -36,3 +36,12 @@ CREATE TABLE statements(
     sent_to TEXT NOT NULL,
     sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE call_logs(
+    id SERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL, 
+    customer_id INT REFERENCES customers(id), 
+    event  TEXT NOT NULL , 
+    details JSONB, 
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
