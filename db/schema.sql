@@ -17,3 +17,13 @@ CREATE TABLE loans (
     status  TEXT NOT NULL
 
 );
+
+CREATE TABLE payments(
+    id SERIAL PRIMARY KEY,
+    loan_id INT NOT NULL REFERENCES loans(id),
+    amount  numeric(12,2) NOT NULL,
+    due_date  DATE NOT NULL,
+    paid_date  DATE,
+    status  TEXT NOT NULL
+
+);
