@@ -6,6 +6,8 @@ from pydantic import BaseModel
 
 from app.db import get_connection
 
+from typing import Literal
+
 app = FastAPI(title="Saarthi Bank Backend")
 
 SESSIONS = {}  # session_id -> customer_id
@@ -49,3 +51,35 @@ def my_loans(customer_id: int = Depends(current_customer)):
             "SELECT * FROM loans WHERE customer_id = %s", (customer_id,)
         ).fetchall()
     return {"loans": loans}
+
+def mask_email(email: str) -> str:
+    name, domain = email.split("@")
+    return f"{name[0]}***@{domain}"
+
+
+class StatementBody(BaseModel):
+    loan_id: int
+    period: Literal["last_month", "last_3_months", "last_6_months"]
+    confirmed: bool
+
+
+@app.post("/statements/send")
+def send_statement(body: StatementBody, customer_id: int = Depends(current_customer)):
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="Caller must confirm first")
+    with get_connection() as conn:
+        loan = conn.execute(
+            "SELECT id FROM loans WHERE id = %s AND customer_id = %s",
+            (body.loan_id, customer_id),
+        ).fetchone()
+        if not loan:
+            raise HTTPException(status_code=404, detail="Loan not found")
+        email = conn.execute(
+            "SELECT email FROM customers WHERE id = %s", (customer_id,)
+        ).fetchone()["email"]
+        conn.execute(
+            "INSERT INTO statements (customer_id, loan_id, period, sent_to) "
+            "VALUES (%s, %s, %s, %s)",
+            (customer_id, body.loan_id, body.period, email),
+        )
+    return {"status": "sent", "sent_to": mask_email(email)}
