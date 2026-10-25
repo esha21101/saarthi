@@ -4,7 +4,9 @@ CREATE TABLE customers (
     phone   TEXT NOT NULL UNIQUE,
     email   TEXT NOT NULL,
     dob     DATE NOT NULL,
-    address  TEXT NOT NULL
+    address  TEXT NOT NULL,
+    card_status TEXT NOT NULL DEFAULT 'active'
+        CHECK (card_status IN ('active', 'blocked'))
 );
 
 CREATE TABLE loans (
