@@ -20,6 +20,14 @@ def current_customer(x_session_id: str = Header(...)):
         raise HTTPException(status_code=401, detail="Not verified")
     return customer_id
 
+def log_event(session_id: str, customer_id: int | None, event: str, details: dict):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO call_logs (session_id, customer_id, event, details) "
+            "VALUES (%s, %s, %s, %s)",
+            (session_id, customer_id, event, Jsonb(details)),
+        )
+
 
 class VerifyBody(BaseModel):
     phone: str
@@ -42,6 +50,7 @@ def verify(body: VerifyBody):
         raise HTTPException(status_code=401, detail="Verification failed")
     session_id = secrets.token_urlsafe(16)
     SESSIONS[session_id] = customer["id"]
+    log_event(session_id, customer["id"], "verify", {"ok": True})
     return {"session_id": session_id, "name": customer["full_name"]}
 
 
@@ -65,7 +74,11 @@ class StatementBody(BaseModel):
 
 
 @app.post("/statements/send")
-def send_statement(body: StatementBody, customer_id: int = Depends(current_customer)):
+def send_statement(
+    body: StatementBody,
+    x_session_id: str = Header(...),
+    customer_id: int = Depends(current_customer),
+):
     if not body.confirmed:
         raise HTTPException(status_code=400, detail="Caller must confirm first")
     with get_connection() as conn:
@@ -83,8 +96,11 @@ def send_statement(body: StatementBody, customer_id: int = Depends(current_custo
             "VALUES (%s, %s, %s, %s)",
             (customer_id, body.loan_id, body.period, email),
         )
+    log_event(
+        x_session_id, customer_id, "send_statement",
+        {"loan_id": body.loan_id, "period": body.period},
+    )
     return {"status": "sent", "sent_to": mask_email(email)}
-
 class BlockCardBody(BaseModel):
     reason: Literal["lost", "stolen", "fraud_suspected", "other"]
     confirmed: bool
@@ -100,7 +116,11 @@ def card_status(customer_id: int = Depends(current_customer)):
 
 
 @app.post("/card/block")
-def block_card(body: BlockCardBody, customer_id: int = Depends(current_customer)):
+def block_card(
+    body: BlockCardBody,
+    x_session_id: str = Header(...),
+    customer_id: int = Depends(current_customer),
+):
     if not body.confirmed:
         raise HTTPException(status_code=400, detail="Caller must confirm first")
     with get_connection() as conn:
@@ -113,6 +133,7 @@ def block_card(body: BlockCardBody, customer_id: int = Depends(current_customer)
             "UPDATE customers SET card_status = 'blocked' WHERE id = %s",
             (customer_id,),
         )
+    log_event(x_session_id, customer_id, "block_card", {"reason": body.reason})
     return {"status": "blocked"}
 
 class AddressBody(BaseModel):
@@ -121,7 +142,12 @@ class AddressBody(BaseModel):
 
 
 @app.post("/address")
-def update_address(body: AddressBody, customer_id: int = Depends(current_customer)):
+@app.post("/address")
+def update_address(
+    body: AddressBody,
+    x_session_id: str = Header(...),
+    customer_id: int = Depends(current_customer),
+):
     if not body.confirmed:
         raise HTTPException(status_code=400, detail="Caller must confirm first")
     with get_connection() as conn:
@@ -129,6 +155,7 @@ def update_address(body: AddressBody, customer_id: int = Depends(current_custome
             "UPDATE customers SET address = %s WHERE id = %s",
             (body.new_address, customer_id),
         )
+    log_event(x_session_id, customer_id, "update_address", {"updated": True})
     return {"status": "updated"}
 
 
@@ -142,10 +169,5 @@ def handoff(
     x_session_id: str = Header(...),
     customer_id: int = Depends(current_customer),
 ):
-    with get_connection() as conn:
-        conn.execute(
-            "INSERT INTO call_logs (session_id, customer_id, event, details) "
-            "VALUES (%s, %s, %s, %s)",
-            (x_session_id, customer_id, "handoff", Jsonb({"reason": body.reason})),
-        )
+    log_event(x_session_id, customer_id, "handoff", {"reason": body.reason})
     return {"status": "transferring"}
