@@ -83,3 +83,33 @@ def send_statement(body: StatementBody, customer_id: int = Depends(current_custo
             (customer_id, body.loan_id, body.period, email),
         )
     return {"status": "sent", "sent_to": mask_email(email)}
+
+class BlockCardBody(BaseModel):
+    reason: Literal["lost", "stolen", "fraud_suspected", "other"]
+    confirmed: bool
+
+
+@app.get("/card")
+def card_status(customer_id: int = Depends(current_customer)):
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT card_status FROM customers WHERE id = %s", (customer_id,)
+        ).fetchone()
+    return {"card_status": row["card_status"]}
+
+
+@app.post("/card/block")
+def block_card(body: BlockCardBody, customer_id: int = Depends(current_customer)):
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="Caller must confirm first")
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT card_status FROM customers WHERE id = %s", (customer_id,)
+        ).fetchone()
+        if row["card_status"] == "blocked":
+            return {"status": "already_blocked"}
+        conn.execute(
+            "UPDATE customers SET card_status = 'blocked' WHERE id = %s",
+            (customer_id,),
+        )
+    return {"status": "blocked"}

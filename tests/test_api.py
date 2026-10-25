@@ -43,3 +43,14 @@ def test_invalid_period_is_rejected():
     body = {"loan_id": 1, "period": "last_year", "confirmed": True}
     r = client.post("/statements/send", json=body, headers=login())
     assert r.status_code == 422
+    
+def test_block_card_needs_confirmation():
+    body = {"reason": "lost", "confirmed": False}
+    r = client.post("/card/block", json=body, headers=login())
+    assert r.status_code == 400
+
+
+def test_block_card_rejects_invalid_reason():
+    body = {"reason": "because", "confirmed": True}
+    r = client.post("/card/block", json=body, headers=login())
+    assert r.status_code == 422
