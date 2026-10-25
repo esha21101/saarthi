@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.db import get_connection
 
 client = TestClient(app)
 
@@ -70,3 +71,55 @@ def test_address_too_short_is_rejected():
 def test_handoff_needs_a_session():
     r = client.post("/handoff", json={"reason": "wants a human"}, headers={"x-session-id": "abc"})
     assert r.status_code == 401
+    
+def test_verify_success_is_logged():
+    login()
+    with get_connection() as conn:
+        logs = conn.execute(
+            "SELECT * FROM call_logs WHERE event = 'verify'"
+        ).fetchall()
+    assert len(logs) == 1
+
+
+def test_statement_success_is_saved_and_logged():
+    body = {"loan_id": 1, "period": "last_month", "confirmed": True}
+    r = client.post("/statements/send", json=body, headers=login())
+    assert r.status_code == 200
+    assert r.json()["sent_to"] == "a***@yahoo.com"
+    with get_connection() as conn:
+        saved = conn.execute("SELECT * FROM statements").fetchall()
+        logs = conn.execute(
+            "SELECT * FROM call_logs WHERE event = 'send_statement'"
+        ).fetchall()
+    assert len(saved) == 1
+    assert len(logs) == 1
+
+
+def test_block_card_twice_is_idempotent():
+    headers = login()
+    body = {"reason": "lost", "confirmed": True}
+    first = client.post("/card/block", json=body, headers=headers)
+    second = client.post("/card/block", json=body, headers=headers)
+    assert first.json()["status"] == "blocked"
+    assert second.json()["status"] == "already_blocked"
+    assert client.get("/card", headers=headers).json()["card_status"] == "blocked"
+
+
+def test_address_update_changes_the_address():
+    new = "5 Lake View Road, Pune 411001"
+    body = {"new_address": new, "confirmed": True}
+    r = client.post("/address", json=body, headers=login())
+    assert r.status_code == 200
+    with get_connection() as conn:
+        row = conn.execute("SELECT address FROM customers WHERE id = 1").fetchone()
+    assert row["address"] == new
+
+
+def test_handoff_is_logged():
+    r = client.post("/handoff", json={"reason": "wants a human"}, headers=login())
+    assert r.status_code == 200
+    with get_connection() as conn:
+        logs = conn.execute(
+            "SELECT * FROM call_logs WHERE event = 'handoff'"
+        ).fetchall()
+    assert len(logs) == 1
