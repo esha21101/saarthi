@@ -1,4 +1,5 @@
 import secrets
+import time
 from datetime import date
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -11,14 +12,17 @@ from typing import Literal
 
 app = FastAPI(title="Saarthi Bank Backend")
 
-SESSIONS = {}  # session_id -> customer_id
+SESSION_TTL_SECONDS = 15 * 60
+MAX_VERIFY_ATTEMPTS = 3
+SESSIONS = {}   
+ATTEMPTS = {}  
 
 
 def current_customer(x_session_id: str = Header(...)):
-    customer_id = SESSIONS.get(x_session_id)
-    if customer_id is None:
+    session = SESSIONS.get(x_session_id)
+    if session is None or session["expires"] < time.time():
         raise HTTPException(status_code=401, detail="Not verified")
-    return customer_id
+    return session["customer_id"]
 
 def log_event(session_id: str, customer_id: int | None, event: str, details: dict):
     with get_connection() as conn:
@@ -41,15 +45,23 @@ def health():
 
 @app.post("/verify")
 def verify(body: VerifyBody):
+    if ATTEMPTS.get(body.phone, 0) >= MAX_VERIFY_ATTEMPTS:
+        raise HTTPException(status_code=423, detail="Too many failed attempts")
     with get_connection() as conn:
         customer = conn.execute(
             "SELECT id, full_name FROM customers WHERE phone = %s AND dob = %s",
             (body.phone, body.dob),
         ).fetchone()
     if not customer:
+        ATTEMPTS[body.phone] = ATTEMPTS.get(body.phone, 0) + 1
+        log_event("unverified", None, "verify_failed", {})
         raise HTTPException(status_code=401, detail="Verification failed")
+    ATTEMPTS.pop(body.phone, None)
     session_id = secrets.token_urlsafe(16)
-    SESSIONS[session_id] = customer["id"]
+    SESSIONS[session_id] = {
+        "customer_id": customer["id"],
+        "expires": time.time() + SESSION_TTL_SECONDS,
+    }
     log_event(session_id, customer["id"], "verify", {"ok": True})
     return {"session_id": session_id, "name": customer["full_name"]}
 

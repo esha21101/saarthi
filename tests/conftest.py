@@ -1,6 +1,7 @@
 import pytest
 
 from app.db import get_connection
+from app.main import ATTEMPTS
 
 
 @pytest.fixture(autouse=True)
@@ -13,3 +14,4 @@ def clean_state():
         )
         conn.execute("DELETE FROM call_logs")
         conn.execute("DELETE FROM statements")
+    ATTEMPTS.clear()

@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.db import get_connection
+from app.main import ATTEMPTS, SESSIONS, app
 
 client = TestClient(app)
 
@@ -123,3 +124,16 @@ def test_handoff_is_logged():
             "SELECT * FROM call_logs WHERE event = 'handoff'"
         ).fetchall()
     assert len(logs) == 1
+    
+def test_lockout_after_three_wrong_attempts():
+    wrong = {"phone": "8964384771", "dob": "1963-11-27"}
+    for _ in range(3):
+        assert client.post("/verify", json=wrong).status_code == 401
+    right = {"phone": "8964384771", "dob": "1993-11-27"}
+    assert client.post("/verify", json=right).status_code == 423
+
+
+def test_expired_session_is_rejected():
+    headers = login()
+    SESSIONS[headers["x-session-id"]]["expires"] = 0
+    assert client.get("/loans", headers=headers).status_code == 401
