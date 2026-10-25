@@ -54,3 +54,19 @@ def test_block_card_rejects_invalid_reason():
     body = {"reason": "because", "confirmed": True}
     r = client.post("/card/block", json=body, headers=login())
     assert r.status_code == 422
+    
+def test_address_needs_confirmation():
+    body = {"new_address": "5 Lake View Road, Pune 411001", "confirmed": False}
+    r = client.post("/address", json=body, headers=login())
+    assert r.status_code == 400
+
+
+def test_address_too_short_is_rejected():
+    body = {"new_address": "abc", "confirmed": True}
+    r = client.post("/address", json=body, headers=login())
+    assert r.status_code == 422
+
+
+def test_handoff_needs_a_session():
+    r = client.post("/handoff", json={"reason": "wants a human"}, headers={"x-session-id": "abc"})
+    assert r.status_code == 401

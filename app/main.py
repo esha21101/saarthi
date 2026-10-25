@@ -2,7 +2,8 @@ import secrets
 from datetime import date
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel
+from psycopg.types.json import Jsonb
+from pydantic import BaseModel, Field
 
 from app.db import get_connection
 
@@ -113,3 +114,38 @@ def block_card(body: BlockCardBody, customer_id: int = Depends(current_customer)
             (customer_id,),
         )
     return {"status": "blocked"}
+
+class AddressBody(BaseModel):
+    new_address: str = Field(min_length=10, max_length=200)
+    confirmed: bool
+
+
+@app.post("/address")
+def update_address(body: AddressBody, customer_id: int = Depends(current_customer)):
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="Caller must confirm first")
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE customers SET address = %s WHERE id = %s",
+            (body.new_address, customer_id),
+        )
+    return {"status": "updated"}
+
+
+class HandoffBody(BaseModel):
+    reason: str = Field(min_length=3, max_length=200)
+
+
+@app.post("/handoff")
+def handoff(
+    body: HandoffBody,
+    x_session_id: str = Header(...),
+    customer_id: int = Depends(current_customer),
+):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO call_logs (session_id, customer_id, event, details) "
+            "VALUES (%s, %s, %s, %s)",
+            (x_session_id, customer_id, "handoff", Jsonb({"reason": body.reason})),
+        )
+    return {"status": "transferring"}
