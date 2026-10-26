@@ -1,106 +1,70 @@
+from app.models import AddressBody, BlockCardBody, HandoffBody, StatementBody
+
+
+def schema_of(model):
+    """JSON schema for a Pydantic model, without the noisy 'title' keys."""
+
+    def strip(node):
+        if isinstance(node, dict):
+            return {k: strip(v) for k, v in node.items() if k != "title"}
+        if isinstance(node, list):
+            return [strip(v) for v in node]
+        return node
+
+    return strip(model.model_json_schema())
+
+
+def tool(name, description, parameters):
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": parameters,
+        },
+    }
+
+
+NO_PARAMS = {"type": "object", "properties": {}}
+
 TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "verify_identity",
-            "description": (
-                "Verify the caller by their date of birth. Must succeed before "
-                "any other tool is used."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "dob": {
-                        "type": "string",
-                        "description": "Caller's date of birth in YYYY-MM-DD format",
-                    }
-                },
-                "required": ["dob"],
+    # Written by hand on purpose: the backend's VerifyBody also takes a phone
+    # number, but the agent supplies that from caller ID. The LLM only gets dob.
+    tool(
+        "verify_identity",
+        "Verify the caller by their date of birth. Must succeed before any "
+        "other tool is used.",
+        {
+            "type": "object",
+            "properties": {
+                "dob": {
+                    "type": "string",
+                    "description": "Caller's date of birth in YYYY-MM-DD format",
+                }
             },
+            "required": ["dob"],
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_loans",
-            "description": "List the verified caller's loans with balance, EMI and due date.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "send_statement",
-            "description": (
-                "Email a loan statement to the caller's registered email. Only set "
-                "confirmed to true after the caller has clearly agreed."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "loan_id": {"type": "integer"},
-                    "period": {
-                        "type": "string",
-                        "enum": ["last_month", "last_3_months", "last_6_months"],
-                    },
-                    "confirmed": {"type": "boolean"},
-                },
-                "required": ["loan_id", "period", "confirmed"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "block_card",
-            "description": (
-                "Block the caller's card. Only set confirmed to true after the "
-                "caller has clearly agreed."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "enum": ["lost", "stolen", "fraud_suspected", "other"],
-                    },
-                    "confirmed": {"type": "boolean"},
-                },
-                "required": ["reason", "confirmed"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_address",
-            "description": (
-                "Update the caller's registered address. Read the new address back "
-                "first, and only set confirmed to true after the caller agrees."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "new_address": {"type": "string"},
-                    "confirmed": {"type": "boolean"},
-                },
-                "required": ["new_address", "confirmed"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "transfer_to_human",
-            "description": (
-                "Hand the call to a human agent. Use when the caller asks for one, "
-                "or when the request is outside what you can do."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {"reason": {"type": "string"}},
-                "required": ["reason"],
-            },
-        },
-    },
+    ),
+    tool(
+        "get_loans",
+        "List the verified caller's loans with balance, EMI and due date.",
+        NO_PARAMS,
+    ),
+    tool(
+        "send_statement",
+        "Email a loan statement to the caller's registered email.",
+        schema_of(StatementBody),
+    ),
+    tool("block_card", "Block the caller's card.", schema_of(BlockCardBody)),
+    tool(
+        "update_address",
+        "Update the caller's registered address. Read the new address back first.",
+        schema_of(AddressBody),
+    ),
+    tool(
+        "transfer_to_human",
+        "Hand the call to a human agent. Use when the caller asks for one, or "
+        "when the request is outside what you can do.",
+        schema_of(HandoffBody),
+    ),
 ]

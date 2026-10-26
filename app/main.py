@@ -4,18 +4,17 @@ from datetime import date
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from psycopg.types.json import Jsonb
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.db import get_connection
-
-from typing import Literal
+from app.models import AddressBody, BlockCardBody, HandoffBody, StatementBody
 
 app = FastAPI(title="Saarthi Bank Backend")
 
 SESSION_TTL_SECONDS = 15 * 60
 MAX_VERIFY_ATTEMPTS = 3
-SESSIONS = {}   
-ATTEMPTS = {}  
+SESSIONS = {}  # session_id -> {"customer_id": ..., "expires": ...}
+ATTEMPTS = {}  # phone -> number of failed verifications
 
 
 def current_customer(x_session_id: str = Header(...)):
@@ -24,6 +23,7 @@ def current_customer(x_session_id: str = Header(...)):
         raise HTTPException(status_code=401, detail="Not verified")
     return session["customer_id"]
 
+
 def log_event(session_id: str, customer_id: int | None, event: str, details: dict):
     with get_connection() as conn:
         conn.execute(
@@ -31,6 +31,11 @@ def log_event(session_id: str, customer_id: int | None, event: str, details: dic
             "VALUES (%s, %s, %s, %s)",
             (session_id, customer_id, event, Jsonb(details)),
         )
+
+
+def mask_email(email: str) -> str:
+    name, domain = email.split("@")
+    return f"{name[0]}***@{domain}"
 
 
 class VerifyBody(BaseModel):
@@ -74,16 +79,6 @@ def my_loans(customer_id: int = Depends(current_customer)):
         ).fetchall()
     return {"loans": loans}
 
-def mask_email(email: str) -> str:
-    name, domain = email.split("@")
-    return f"{name[0]}***@{domain}"
-
-
-class StatementBody(BaseModel):
-    loan_id: int
-    period: Literal["last_month", "last_3_months", "last_6_months"]
-    confirmed: bool
-
 
 @app.post("/statements/send")
 def send_statement(
@@ -109,13 +104,12 @@ def send_statement(
             (customer_id, body.loan_id, body.period, email),
         )
     log_event(
-        x_session_id, customer_id, "send_statement",
+        x_session_id,
+        customer_id,
+        "send_statement",
         {"loan_id": body.loan_id, "period": body.period},
     )
     return {"status": "sent", "sent_to": mask_email(email)}
-class BlockCardBody(BaseModel):
-    reason: Literal["lost", "stolen", "fraud_suspected", "other"]
-    confirmed: bool
 
 
 @app.get("/card")
@@ -148,12 +142,7 @@ def block_card(
     log_event(x_session_id, customer_id, "block_card", {"reason": body.reason})
     return {"status": "blocked"}
 
-class AddressBody(BaseModel):
-    new_address: str = Field(min_length=10, max_length=200)
-    confirmed: bool
 
-
-@app.post("/address")
 @app.post("/address")
 def update_address(
     body: AddressBody,
@@ -169,10 +158,6 @@ def update_address(
         )
     log_event(x_session_id, customer_id, "update_address", {"updated": True})
     return {"status": "updated"}
-
-
-class HandoffBody(BaseModel):
-    reason: str = Field(min_length=3, max_length=200)
 
 
 @app.post("/handoff")
